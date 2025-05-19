@@ -42,23 +42,23 @@ bool DbManager::register_client(const std::string& client_id, const std::string&
 
         if (client_exists(txn, client_id)) {
             // Update existing client
-            txn.exec_params(
+            txn.exec(
                 "UPDATE clients SET last_connected = CURRENT_TIMESTAMP, "
                 "last_ip = $1, last_port = $2, connection_count = connection_count + 1 "
                 "WHERE client_id = $3",
-                ip_address, port, client_id);
+                pqxx::params(ip_address, port, client_id));
         } else {
             // Insert new client
-            txn.exec_params(
+            txn.exec(
                 "INSERT INTO clients (client_id, last_ip, last_port) VALUES ($1, $2, $3)",
-                client_id, ip_address, port);
+                pqxx::params(client_id, ip_address, port));
         }
 
         // Log the connection event
-        txn.exec_params(
+        txn.exec(
             "INSERT INTO connection_events (client_id, event_type, ip_address, port) "
             "VALUES ($1, 'CONNECT', $2, $3)",
-            client_id, ip_address, port);
+            pqxx::params(client_id, ip_address, port));
 
         txn.commit();
         return true;
@@ -76,9 +76,9 @@ bool DbManager::log_client_disconnect(const std::string& client_id) {
         pqxx::work txn(conn);
 
         // Get the last known IP and port
-        auto result = txn.exec_params(
+        auto result = txn.exec(
             "SELECT last_ip, last_port FROM clients WHERE client_id = $1",
-            client_id);
+            pqxx::params(client_id));
         
         if (result.empty()) {
             ui::print_message("Database", "Client not found for disconnect: " + client_id, 
@@ -90,10 +90,10 @@ bool DbManager::log_client_disconnect(const std::string& client_id) {
         int port = result[0]["last_port"].as<int>();
 
         // Log the disconnect event
-        txn.exec_params(
+        txn.exec(
             "INSERT INTO connection_events (client_id, event_type, ip_address, port) "
             "VALUES ($1, 'DISCONNECT', $2, $3)",
-            client_id, ip, port);
+            pqxx::params(client_id, ip, port));
 
         txn.commit();
         return true;
@@ -117,9 +117,9 @@ bool DbManager::register_topic(const std::string& topic_name, const std::string&
         }
 
         if (!topic_exists(txn, topic_name)) {
-            txn.exec_params(
+            txn.exec(
                 "INSERT INTO topics (name, owner_client_id) VALUES ($1, $2)",
-                topic_name, owner_client_id);
+                pqxx::params(topic_name, owner_client_id));
             
             txn.commit();
             ui::print_message("Database", "Registered new topic: " + topic_name, 
@@ -140,9 +140,9 @@ int DbManager::get_topic_id(const std::string& topic_name) {
         pqxx::connection conn(connection_string_);
         pqxx::work txn(conn);
         
-        auto result = txn.exec_params(
+        auto result = txn.exec(
             "SELECT id FROM topics WHERE name = $1",
-            topic_name);
+            pqxx::params(topic_name));
         
         if (result.empty()) {
             return -1; // Topic not found
@@ -169,9 +169,9 @@ bool DbManager::add_subscription(const std::string& client_id, int topic_id) {
         }
         
         // Check if topic exists
-        auto topic_result = txn.exec_params(
+        auto topic_result = txn.exec(
             "SELECT name FROM topics WHERE id = $1",
-            topic_id);
+            pqxx::params(topic_id));
             
         if (topic_result.empty()) {
             ui::print_message("Database", "Cannot add subscription: topic ID does not exist: " + 
@@ -180,25 +180,25 @@ bool DbManager::add_subscription(const std::string& client_id, int topic_id) {
         }
         
         // Check if subscription already exists
-        auto sub_result = txn.exec_params(
+        auto sub_result = txn.exec(
             "SELECT id, active FROM subscriptions WHERE client_id = $1 AND topic_id = $2",
-            client_id, topic_id);
+            pqxx::params(client_id, topic_id));
             
         if (!sub_result.empty()) {
             // Subscription exists - check if it's active
             bool active = sub_result[0]["active"].as<bool>();
             if (!active) {
                 // Reactivate it
-                txn.exec_params(
+                txn.exec(
                     "UPDATE subscriptions SET active = TRUE, subscribed_at = CURRENT_TIMESTAMP "
                     "WHERE client_id = $1 AND topic_id = $2",
-                    client_id, topic_id);
+                    pqxx::params(client_id, topic_id));
             }
         } else {
             // Create new subscription
-            txn.exec_params(
+            txn.exec(
                 "INSERT INTO subscriptions (client_id, topic_id) VALUES ($1, $2)",
-                client_id, topic_id);
+                pqxx::params(client_id, topic_id));
         }
         
         txn.commit();
@@ -216,10 +216,10 @@ bool DbManager::remove_subscription(const std::string& client_id, int topic_id) 
         pqxx::connection conn(connection_string_);
         pqxx::work txn(conn);
         
-        auto result = txn.exec_params(
+        auto result = txn.exec(
             "UPDATE subscriptions SET active = FALSE "
             "WHERE client_id = $1 AND topic_id = $2",
-            client_id, topic_id);
+            pqxx::params(client_id, topic_id));
             
         txn.commit();
         return true;
@@ -239,10 +239,10 @@ bool DbManager::log_message(const std::string& publisher_client_id,
         pqxx::connection conn(connection_string_);
         pqxx::work txn(conn);
         
-        txn.exec_params(
+        txn.exec(
             "INSERT INTO message_logs (publisher_client_id, topic_id, payload_size, payload_preview) "
             "VALUES ($1, $2, $3, $4)",
-            publisher_client_id, topic_id, static_cast<int>(payload_size), payload_preview);
+            pqxx::params(publisher_client_id, topic_id, static_cast<int>(payload_size), payload_preview));
             
         txn.commit();
         return true;
@@ -254,16 +254,16 @@ bool DbManager::log_message(const std::string& publisher_client_id,
 }
 
 bool DbManager::client_exists(pqxx::work& txn, const std::string& client_id) {
-    auto result = txn.exec_params(
+    auto result = txn.exec(
         "SELECT 1 FROM clients WHERE client_id = $1",
-        client_id);
+        pqxx::params(client_id));
     return !result.empty();
 }
 
 bool DbManager::topic_exists(pqxx::work& txn, const std::string& topic_name) {
-    auto result = txn.exec_params(
+    auto result = txn.exec(
         "SELECT 1 FROM topics WHERE name = $1",
-        topic_name);
+        pqxx::params(topic_name));
     return !result.empty();
 }
 

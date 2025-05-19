@@ -40,10 +40,7 @@ private:
     std::string connection_string_;
     std::mutex db_mutex_;
     
-    // Check if a client exists
     bool client_exists(pqxx::work& txn, const std::string& client_id);
-    
-    // Check if a topic exists
     bool topic_exists(pqxx::work& txn, const std::string& topic_name);
 };
 
