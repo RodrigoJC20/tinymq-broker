@@ -502,13 +502,330 @@ namespace tinymq
             }
 
             txn.commit();
-                }
+        }
         catch (const std::exception &e)
         {
             ui::print_message("Database", std::string("Error getting published topics: ") + e.what(),
                               ui::MessageType::ERROR);
         }
         return topics;
+    }
+
+    std::vector<std::map<std::string, std::string>> DbManager::get_admin_requests(const std::string &owner_id, bool only_pending)
+    {
+        std::vector<std::map<std::string, std::string>> requests;
+        try
+        {
+            std::lock_guard<std::mutex> lock(db_mutex_);
+            pqxx::connection conn(connection_string_);
+            pqxx::work txn(conn);
+
+            std::string status_filter = only_pending ? " AND ar.status = 'pending'" : "";
+
+            pqxx::result result = txn.exec(
+                "SELECT ar.id, t.name as topic, ar.requester_client_id, ar.status, "
+                "EXTRACT(EPOCH FROM ar.request_timestamp) as request_time "
+                "FROM admin_requests ar "
+                "JOIN topics t ON ar.topic_id = t.id "
+                "WHERE t.owner_client_id = $1" +
+                    status_filter + " "
+                                    "ORDER BY ar.request_timestamp DESC",
+                pqxx::params(owner_id));
+
+            for (auto row : result)
+            {
+                std::map<std::string, std::string> req;
+                req["id"] = row["id"].as<std::string>();
+                req["topic"] = row["topic"].as<std::string>();
+                req["requester_id"] = row["requester_client_id"].as<std::string>();
+                req["status"] = row["status"].as<std::string>();
+                req["request_time"] = row["request_time"].as<std::string>();
+                requests.push_back(req);
+            }
+
+            txn.commit();
+        }
+        catch (const std::exception &e)
+        {
+            ui::print_message("DbManager",
+                              "Error getting admin requests: " + std::string(e.what()),
+                              ui::MessageType::ERROR);
+        }
+        return requests;
+    }
+
+    bool DbManager::request_admin_status(const std::string &topic_name, const std::string &requester_id)
+    {
+        try
+        {
+            // Crear una conexión local como en los otros métodos
+            std::lock_guard<std::mutex> lock(db_mutex_);
+            pqxx::connection conn(connection_string_);
+            pqxx::work txn(conn);
+
+            // Obtener el ID del tópico
+            int topic_id = get_topic_id(topic_name);
+            if (topic_id == -1)
+            {
+                ui::print_message("DbManager", "Topic not found: " + topic_name, ui::MessageType::WARNING);
+                return false;
+            }
+
+            // Comprobar si ya existe una solicitud pendiente para este usuario y tópico
+            pqxx::result check_result = txn.exec(
+                "SELECT id FROM admin_requests "
+                "WHERE topic_id = $1 AND requester_client_id = $2 AND status = 'pending'",
+                pqxx::params(topic_id, requester_id));
+
+            if (!check_result.empty())
+            {
+                ui::print_message("DbManager", "Ya existe una solicitud pendiente para este usuario y tópico",
+                                  ui::MessageType::INFO);
+                txn.commit();
+                return true; // No es un error, la solicitud ya existe
+            }
+
+            // Insertar nueva solicitud
+            pqxx::result result = txn.exec(
+                "INSERT INTO admin_requests (topic_id, requester_client_id, status, request_timestamp) "
+                "VALUES ($1, $2, 'pending', NOW()) RETURNING id",
+                pqxx::params(topic_id, requester_id));
+
+            txn.commit();
+
+            ui::print_message("DbManager",
+                              "Admin request registered for topic " + topic_name + " by " + requester_id,
+                              ui::MessageType::SUCCESS);
+            return true;
+        }
+        catch (const std::exception &e)
+        {
+            ui::print_message("DbManager",
+                              "Error registering admin request: " + std::string(e.what()),
+                              ui::MessageType::ERROR);
+            return false;
+        }
+    }
+
+    bool DbManager::respond_to_admin_request(const std::string &topic_name, const std::string &owner_id,
+                                             const std::string &requester_id, bool approved)
+    {
+        try
+        {
+            std::lock_guard<std::mutex> lock(db_mutex_);
+            pqxx::connection conn(connection_string_);
+            pqxx::work txn(conn);
+
+            // Verificar que el tópico existe y el dueño es correcto
+            auto topic_result = txn.exec(
+                "SELECT id FROM topics WHERE name = $1 AND owner_client_id = $2",
+                pqxx::params(topic_name, owner_id));
+
+            if (topic_result.empty())
+            {
+                ui::print_message("DbManager",
+                                  "Topic not found or user is not owner: " + topic_name,
+                                  ui::MessageType::WARNING);
+                return false;
+            }
+
+            int topic_id = topic_result[0]["id"].as<int>();
+
+            // Actualizar estado de solicitud
+            std::string status = approved ? "approved" : "rejected";
+            auto update_result = txn.exec(
+                "UPDATE admin_requests "
+                "SET status = $1, response_timestamp = NOW() "
+                "WHERE topic_id = $2 AND requester_client_id = $3 AND status = 'pending' "
+                "RETURNING id",
+                pqxx::params(status, topic_id, requester_id));
+
+            if (update_result.empty())
+            {
+                ui::print_message("DbManager",
+                                  "No pending request found for this topic/requester",
+                                  ui::MessageType::WARNING);
+                return false;
+            }
+
+            // Si fue aprobada, añadir a tabla de administradores
+            if (approved)
+            {
+                // Eliminar cualquier administrador existente para este tópico
+                txn.exec(
+                    "DELETE FROM topic_admins WHERE topic_id = $1",
+                    pqxx::params(topic_id));
+
+                // Insertar nuevo administrador
+                txn.exec(
+                    "INSERT INTO topic_admins (topic_id, admin_client_id) "
+                    "VALUES ($1, $2)",
+                    pqxx::params(topic_id, requester_id));
+            }
+
+            txn.commit();
+
+            ui::print_message("DbManager",
+                              "Admin request for topic " + topic_name + " by " + requester_id +
+                                  " has been " + status,
+                              ui::MessageType::SUCCESS);
+            return true;
+        }
+        catch (const std::exception &e)
+        {
+            ui::print_message("DbManager",
+                              "Error responding to admin request: " + std::string(e.what()),
+                              ui::MessageType::ERROR);
+            return false;
+        }
+    }
+
+    bool DbManager::revoke_admin_status(const std::string &topic_name, const std::string &owner_id,
+                                        const std::string &admin_id)
+    {
+        try
+        {
+            std::lock_guard<std::mutex> lock(db_mutex_);
+            pqxx::connection conn(connection_string_);
+            pqxx::work txn(conn);
+
+            // Verificar que el tópico existe y el dueño es correcto
+            auto topic_result = txn.exec(
+                "SELECT id FROM topics WHERE name = $1 AND owner_client_id = $2",
+                pqxx::params(topic_name, owner_id));
+
+            if (topic_result.empty())
+            {
+                ui::print_message("DbManager",
+                                  "Topic not found or user is not owner: " + topic_name,
+                                  ui::MessageType::WARNING);
+                return false;
+            }
+
+            int topic_id = topic_result[0]["id"].as<int>();
+
+            // Eliminar de tabla de administradores
+            auto delete_result = txn.exec(
+                "DELETE FROM topic_admins "
+                "WHERE topic_id = $1 AND admin_client_id = $2 "
+                "RETURNING topic_id",
+                pqxx::params(topic_id, admin_id));
+
+            if (delete_result.empty())
+            {
+                ui::print_message("DbManager",
+                                  "Admin not found for this topic",
+                                  ui::MessageType::WARNING);
+                return false;
+            }
+
+            txn.commit();
+
+            ui::print_message("DbManager",
+                              "Admin status revoked for " + admin_id + " on topic " + topic_name,
+                              ui::MessageType::SUCCESS);
+            return true;
+        }
+        catch (const std::exception &e)
+        {
+            ui::print_message("DbManager",
+                              "Error revoking admin status: " + std::string(e.what()),
+                              ui::MessageType::ERROR);
+            return false;
+        }
+    }
+
+    bool DbManager::is_topic_admin(const std::string &topic_name, const std::string &client_id)
+    {
+        try
+        {
+            std::lock_guard<std::mutex> lock(db_mutex_);
+            pqxx::connection conn(connection_string_);
+            pqxx::work txn(conn);
+
+            // Verificar si el usuario es dueño del tópico
+            auto owner_result = txn.exec(
+                "SELECT 1 FROM topics WHERE name = $1 AND owner_client_id = $2",
+                pqxx::params(topic_name, client_id));
+
+            if (!owner_result.empty())
+            {
+                return true; // El dueño siempre es administrador
+            }
+
+            // Verificar si es administrador adicional
+            auto admin_result = txn.exec(
+                "SELECT 1 FROM topic_admins ta "
+                "JOIN topics t ON ta.topic_id = t.id "
+                "WHERE t.name = $1 AND ta.admin_client_id = $2",
+                pqxx::params(topic_name, client_id));
+
+            return !admin_result.empty();
+        }
+        catch (const std::exception &e)
+        {
+            ui::print_message("DbManager",
+                              "Error checking admin status: " + std::string(e.what()),
+                              ui::MessageType::ERROR);
+            return false;
+        }
+    }
+
+    bool DbManager::set_sensor_status(const std::string &topic_name, const std::string &sensor_name,
+                                      const std::string &client_id, bool active)
+    {
+        try
+        {
+            std::lock_guard<std::mutex> lock(db_mutex_);
+            pqxx::connection conn(connection_string_);
+            pqxx::work txn(conn);
+
+            // Verificar que el usuario es dueño o administrador
+            if (!is_topic_admin(topic_name, client_id))
+            {
+                ui::print_message("DbManager",
+                                  "User is not owner or admin of topic: " + topic_name,
+                                  ui::MessageType::WARNING);
+                return false;
+            }
+
+            // Obtener ID del tópico
+            auto topic_result = txn.exec(
+                "SELECT id FROM topics WHERE name = $1",
+                pqxx::params(topic_name));
+
+            if (topic_result.empty())
+            {
+                ui::print_message("DbManager",
+                                  "Topic not found: " + topic_name,
+                                  ui::MessageType::WARNING);
+                return false;
+            }
+
+            int topic_id = topic_result[0]["id"].as<int>();
+
+            // Insertar o actualizar configuración del sensor
+            txn.exec(
+                "INSERT INTO admin_sensor_config (topic_id, sensor_name, active, set_by, updated_at) "
+                "VALUES ($1, $2, $3, $4, NOW()) "
+                "ON CONFLICT (topic_id, sensor_name) DO UPDATE "
+                "SET active = $3, set_by = $4, updated_at = NOW()",
+                pqxx::params(topic_id, sensor_name, active, client_id));
+
+            txn.commit();
+
+            ui::print_message("DbManager",
+                              "Sensor " + sensor_name + " " + (active ? "activated" : "deactivated") + " for topic " + topic_name,
+                              ui::MessageType::SUCCESS);
+            return true;
+        }
+        catch (const std::exception &e)
+        {
+            ui::print_message("DbManager",
+                              "Error setting sensor status: " + std::string(e.what()),
+                              ui::MessageType::ERROR);
+            return false;
+        }
     }
 
 } // namespace tinymq

@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <iostream>
 #include <nlohmann/json.hpp>
+#include <unordered_set>
 
 namespace tinymq
 {
@@ -518,6 +519,7 @@ namespace tinymq
         }
         return ""; // No es un formato de tópico válido
     }
+    
     void Broker::send_published_topics(std::shared_ptr<Session> session)
     {
         if (!has_database())
@@ -536,6 +538,84 @@ namespace tinymq
 
         // Enviar la respuesta al cliente
         session->send_topic_list(topics);
+    }
+
+    void Broker::notify_admin_request(const std::string &owner_id, const std::string &topic_name, const std::string &requester_id)
+    {
+        // Buscar la sesión del dueño del tópico
+        std::shared_ptr<Session> owner_session = nullptr;
+        {
+            std::lock_guard<std::mutex> lock(sessions_mutex_);
+            auto it = sessions_.find(owner_id);
+            if (it != sessions_.end())
+            {
+                owner_session = it->second;
+            }
+        }
+
+        // Si el dueño está conectado, enviarle una notificación
+        if (owner_session)
+        {
+            try
+            {
+                // Crear un mensaje de notificación
+                nlohmann::json notification = {
+                    {"__admin_notification", true},
+                    {"type", "request"},
+                    {"requester_id", requester_id},
+                    {"topic_name", topic_name},
+                    {"timestamp", std::time(nullptr)}};
+
+                std::string notification_json = notification.dump();
+                std::vector<uint8_t> payload(notification_json.begin(), notification_json.end());
+
+                // El tópico para notificaciones de administración
+                std::string notification_topic = owner_id + "/admin_notifications";
+
+                // Publicar la notificación directamente a los suscriptores (si hay)
+                std::vector<std::shared_ptr<Session>> subscribers;
+                {
+                    std::lock_guard<std::mutex> lock(topics_mutex_);
+                    auto it = topic_subscribers_.find(notification_topic);
+                    if (it != topic_subscribers_.end())
+                    {
+                        subscribers = it->second;
+                    }
+                }
+
+                for (auto &session : subscribers)
+                {
+                    try
+                    {
+                        Packet packet(PacketType::PUB, 0, payload);
+                        session->send_packet(packet);
+                    }
+                    catch (const std::exception &e)
+                    {
+                        ui::print_message("Broker",
+                                          "Error al enviar notificación de solicitud: " + std::string(e.what()),
+                                          ui::MessageType::ERROR);
+                    }
+                }
+
+                ui::print_message("Broker",
+                                  "Notificación de solicitud enviada a cliente: " + owner_id,
+                                  ui::MessageType::INFO);
+            }
+            catch (const std::exception &e)
+            {
+                ui::print_message("Broker",
+                                  "Error al crear notificación de solicitud: " + std::string(e.what()),
+                                  ui::MessageType::ERROR);
+            }
+        }
+        else
+        {
+            // El dueño no está conectado, guardar la solicitud solo en la base de datos
+            ui::print_message("Broker",
+                              "El dueño del tópico no está conectado, la solicitud quedará pendiente",
+                              ui::MessageType::INFO);
+        }
     }
 
 } // namespace tinymq

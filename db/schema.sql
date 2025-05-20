@@ -15,8 +15,7 @@ CREATE TABLE topics (
     id SERIAL PRIMARY KEY,
     name VARCHAR(255) UNIQUE NOT NULL,
     owner_client_id VARCHAR(255) NOT NULL REFERENCES clients(client_id),
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    publish BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Subscriptions table - tracks who is subscribed to what
@@ -47,6 +46,35 @@ CREATE TABLE connection_events (
     ip_address VARCHAR(45),
     port INTEGER,
     timestamp TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Solicitudes de administración
+CREATE TABLE admin_requests (
+  id SERIAL PRIMARY KEY,
+  topic_id INTEGER REFERENCES topics(id),
+  requester_client_id TEXT REFERENCES clients(client_id),
+  status TEXT CHECK (status IN ('pending', 'approved', 'rejected')),
+  request_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  response_timestamp TIMESTAMP,
+  UNIQUE(topic_id, requester_client_id)
+);
+
+-- Administradores activos (solo puede haber uno adicional por tópico)
+CREATE TABLE topic_admins (
+  topic_id INTEGER REFERENCES topics(id),
+  admin_client_id TEXT REFERENCES clients(client_id),
+  granted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (topic_id, admin_client_id)
+);
+
+-- Configuración de sensores por administrador
+CREATE TABLE admin_sensor_config (
+  topic_id INTEGER REFERENCES topics(id),
+  sensor_name TEXT,
+  active BOOLEAN DEFAULT TRUE,
+  set_by TEXT REFERENCES clients(client_id),
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (topic_id, sensor_name)
 );
 
 -- Create indexes for better query performance

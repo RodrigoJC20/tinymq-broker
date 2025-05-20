@@ -41,6 +41,17 @@ namespace tinymq
         // Initialize the database with the schema if not already set up
         bool setup_schema();
 
+                // Para el DbManager
+        bool request_admin_status(const std::string &topic_name, const std::string &requester_id);
+        bool respond_to_admin_request(const std::string &topic_name, const std::string &owner_id,
+                                      const std::string &requester_id, bool approved);
+        bool revoke_admin_status(const std::string &topic_name, const std::string &owner_id,
+                                 const std::string &admin_id);
+        bool set_sensor_status(const std::string &topic_name, const std::string &sensor_name,
+                               const std::string &client_id, bool active);
+        bool is_topic_admin(const std::string &topic_name, const std::string &client_id);
+        std::vector<std::map<std::string, std::string>> get_admin_requests(const std::string &owner_id, bool only_pending = true);
+
     private:
         std::string connection_string_;
         std::mutex db_mutex_;
