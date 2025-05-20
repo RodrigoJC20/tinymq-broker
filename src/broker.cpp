@@ -384,7 +384,6 @@ namespace tinymq
         // Código existente para publicación normal
         std::vector<std::shared_ptr<Session>> subscribers;
         bool is_new_topic = false;
-
         {
             std::lock_guard<std::mutex> lock(topics_mutex_);
             auto it = topic_subscribers_.find(topic);
@@ -476,17 +475,23 @@ namespace tinymq
             return;
         }
 
-        for (auto &session : subscribers)
-        {
-            try
-            {
-                Packet packet(PacketType::PUB, 0, message);
-                session->send_packet(packet);
-            }
-            catch (const std::exception &e)
-            {
-                ui::print_message("Broker", "Error sending message to subscriber: " + std::string(e.what()), ui::MessageType::ERROR);
-            }
+        nlohmann::json json_msg = {
+            {"topic", topic},
+            {"message", std::string(message.begin(), message.end())}
+        };
+        std::string json_str = json_msg.dump();
+        std::vector<uint8_t> payload(json_str.begin(), json_str.end());
+        Packet packet(PacketType::PUB, 0, payload);
+
+        for (auto& subscriber : subscribers) {
+             try
+                {
+                    subscriber->send_packet(packet);
+                }
+                catch (const std::exception &e)
+                {
+                    ui::print_message("Broker", "Error sending message to subscriber: " + std::string(e.what()), ui::MessageType::ERROR);
+                }
         }
     }
 
