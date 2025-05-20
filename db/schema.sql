@@ -15,7 +15,8 @@ CREATE TABLE topics (
     id SERIAL PRIMARY KEY,
     name VARCHAR(255) UNIQUE NOT NULL,
     owner_client_id VARCHAR(255) NOT NULL REFERENCES clients(client_id),
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    publish BOOLEAN DEFAULT FALSE,
 );
 
 -- Subscriptions table - tracks who is subscribed to what

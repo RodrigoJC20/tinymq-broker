@@ -36,6 +36,7 @@ Stores information about message topics created by clients.
 | `name` | VARCHAR(255) | UNIQUE NOT NULL | Topic name (format: [client_id]/topic_name) |
 | `owner_client_id` | VARCHAR(255) | NOT NULL REFERENCES clients(client_id) | Client ID of the topic owner |
 | `created_at` | TIMESTAMP WITH TIME ZONE | DEFAULT CURRENT_TIMESTAMP | When the topic was first created |
+| `publish` | BOOLEAN  | DEFAULT FALSE | Whether the topic is currently active |
 
 ### `subscriptions`
 
