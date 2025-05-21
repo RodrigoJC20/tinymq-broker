@@ -36,13 +36,14 @@ namespace tinymq
 
         // Check if a DbManager is configured
         bool has_database() const { return db_manager_ != nullptr; }
+        std::string extract_client_id_from_topic(const std::string &topic);
+        void notify_admin_request(const std::string &owner_id, const std::string &topic_name, const std::string &requester_id);
+        void process_admin_request(const std::string &topic, const std::string &requester_id);
 
     private:
         void accept_connections();
 
         // Helper to extract client ID from topic name
-        std::string extract_client_id_from_topic(const std::string &topic);
-        void notify_admin_request(const std::string &owner_id, const std::string &topic_name, const std::string &requester_id);
 
         using TopicSubscribers = std::unordered_map<std::string, std::vector<std::shared_ptr<Session>>>;
 

@@ -478,21 +478,21 @@ namespace tinymq
 
         nlohmann::json json_msg = {
             {"topic", topic},
-            {"message", std::string(message.begin(), message.end())}
-        };
+            {"message", std::string(message.begin(), message.end())}};
         std::string json_str = json_msg.dump();
         std::vector<uint8_t> payload(json_str.begin(), json_str.end());
         Packet packet(PacketType::PUB, 0, payload);
 
-        for (auto& subscriber : subscribers) {
-             try
-                {
-                    subscriber->send_packet(packet);
-                }
-                catch (const std::exception &e)
-                {
-                    ui::print_message("Broker", "Error sending message to subscriber: " + std::string(e.what()), ui::MessageType::ERROR);
-                }
+        for (auto &subscriber : subscribers)
+        {
+            try
+            {
+                subscriber->send_packet(packet);
+            }
+            catch (const std::exception &e)
+            {
+                ui::print_message("Broker", "Error sending message to subscriber: " + std::string(e.what()), ui::MessageType::ERROR);
+            }
         }
     }
 
@@ -519,7 +519,7 @@ namespace tinymq
         }
         return ""; // No es un formato de tópico válido
     }
-    
+
     void Broker::send_published_topics(std::shared_ptr<Session> session)
     {
         if (!has_database())
@@ -618,4 +618,19 @@ namespace tinymq
         }
     }
 
+    void Broker::process_admin_request(const std::string &topic, const std::string &requester_id)
+    {
+        // Extraer el ID del cliente propietario del tópico
+        std::string owner_id = extract_client_id_from_topic(topic);
+
+        if (has_database())
+        {
+            bool success = db_manager_->request_admin_status(topic, requester_id);
+            if (success)
+            {
+                // Notificar al propietario del tópico sobre la solicitud
+                notify_admin_request(owner_id, topic, requester_id);
+            }
+        }
+    }
 } // namespace tinymq

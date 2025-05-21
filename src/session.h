@@ -40,7 +40,6 @@ namespace tinymq
         void handle_publish(const Packet &packet);
         void handle_subscribe(const Packet &packet);
         void handle_unsubscribe(const Packet &packet);
-        void handle_topic_request(const Packet &packet);
         void handle_admin_request(const Packet &packet);
         void send_ack(PacketType ack_type, uint16_t packet_id = 0);
 

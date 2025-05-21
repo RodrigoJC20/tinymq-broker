@@ -9,6 +9,7 @@ find_package(Boost REQUIRED COMPONENTS system thread)
 find_package(PostgreSQL REQUIRED)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(PQXX REQUIRED libpqxx)
+find_library(PQXX_LIBRARY NAMES pqxx)
 
 # Agrega el directorio include para nlohmann/json
 include_directories(${Boost_INCLUDE_DIRS} ${PostgreSQL_INCLUDE_DIRS} ${PQXX_INCLUDE_DIRS} ${CMAKE_SOURCE_DIR}/include)
@@ -19,12 +20,11 @@ file(GLOB_RECURSE SOURCES "src/*.cpp")
 add_executable(tinymq_broker ${SOURCES})
 
 target_link_libraries(tinymq_broker PRIVATE 
-    ${Boost_LIBRARIES} 
+    ${Boost_LIBRARIES}
     ${PostgreSQL_LIBRARIES}
-    ${PQXX_LDFLAGS}
+    ${PQXX_LIBRARY}
     pq
 )
-
 file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/db)
 configure_file(${CMAKE_SOURCE_DIR}/db/schema.sql ${CMAKE_BINARY_DIR}/db/schema.sql COPYONLY)
 

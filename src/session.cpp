@@ -2,6 +2,7 @@
 #include "broker.h"
 #include "terminal_ui.h"
 #include <iostream>
+#include <nlohmann/json.hpp> // Añadir este include
 
 namespace tinymq
 {
@@ -334,18 +335,8 @@ namespace tinymq
                     {
                         ui::print_message("Session", "Client " + client_id_ + " requesting admin status for topic: " + topic, ui::MessageType::INFO);
 
-                        // Extraer el ID del cliente propietario del tópico
-                        std::string owner_id = broker_.extract_client_id_from_topic(topic);
-
-                        if (broker_.has_database())
-                        {
-                            bool success = broker_.get_db_manager().request_admin_status(topic, client_id_);
-                            if (success)
-                            {
-                                // Notificar al propietario del tópico sobre la solicitud
-                                broker_.notify_admin_request(owner_id, topic, client_id_);
-                            }
-                        }
+                        // Usar el nuevo método público en Broker
+                        broker_.process_admin_request(topic, client_id_);
                     }
                     // Puedes añadir otros tipos de acciones aquí
                 }
