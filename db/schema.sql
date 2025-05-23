@@ -1,5 +1,8 @@
 -- TinyMQ Broker PostgreSQL Schema
 
+-- Create schema if not exists
+CREATE SCHEMA IF NOT EXISTS public;
+
 -- Clients table
 CREATE TABLE clients (
     id SERIAL PRIMARY KEY,
@@ -15,7 +18,8 @@ CREATE TABLE topics (
     id SERIAL PRIMARY KEY,
     name VARCHAR(255) UNIQUE NOT NULL,
     owner_client_id VARCHAR(255) NOT NULL REFERENCES clients(client_id),
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    publish BOOLEAN DEFAULT FALSE
 );
 
 -- Subscriptions table - tracks who is subscribed to what
@@ -83,4 +87,7 @@ CREATE INDEX idx_subscriptions_client ON subscriptions(client_id);
 CREATE INDEX idx_subscriptions_topic ON subscriptions(topic_id);
 CREATE INDEX idx_message_logs_publisher ON message_logs(publisher_client_id);
 CREATE INDEX idx_message_logs_topic ON message_logs(topic_id);
-CREATE INDEX idx_connection_events_client ON connection_events(client_id); 
+CREATE INDEX idx_connection_events_client ON connection_events(client_id);
+CREATE INDEX idx_admin_requests_requester ON admin_requests(requester_client_id);
+CREATE INDEX idx_admin_requests_topic ON admin_requests(topic_id);
+CREATE INDEX idx_topic_admins_admin ON topic_admins(admin_client_id);

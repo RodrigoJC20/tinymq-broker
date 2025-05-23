@@ -54,35 +54,23 @@ namespace tinymq
 
             if (client_exists(txn, client_id))
             {
-                // Update existing client
-                std::stringstream query;
-                query << "UPDATE clients SET last_connected = CURRENT_TIMESTAMP, "
-                      << "last_ip = " << txn.quote(ip_address)
-                      << ", last_port = " << port
-                      << ", connection_count = connection_count + 1 "
-                      << "WHERE client_id = " << txn.quote(client_id);
-
-                txn.exec(query.str());
+                exec_params(txn,
+                    "UPDATE clients SET last_connected = CURRENT_TIMESTAMP, "
+                    "last_ip = $1, last_port = $2, connection_count = connection_count + 1 "
+                    "WHERE client_id = $3",
+                    ip_address, port, client_id);
             }
             else
             {
-                // Insert new client
-                std::stringstream query;
-                query << "INSERT INTO clients (client_id, last_ip, last_port) VALUES ("
-                      << txn.quote(client_id) << ", "
-                      << txn.quote(ip_address) << ", "
-                      << port << ")";
-
-                txn.exec(query.str());
+                exec_params(txn,
+                    "INSERT INTO clients (client_id, last_ip, last_port) VALUES ($1, $2, $3)",
+                    client_id, ip_address, port);
             }
 
-            // Log the connection event
-            std::stringstream event_query;
-            event_query << "INSERT INTO connection_events (client_id, event_type, ip_address, port) "
-                        << "VALUES (" << txn.quote(client_id) << ", 'CONNECT', "
-                        << txn.quote(ip_address) << ", " << port << ")";
-
-            txn.exec(event_query.str());
+            exec_params(txn,
+                "INSERT INTO connection_events (client_id, event_type, ip_address, port) "
+                "VALUES ($1, $2, $3, $4)",
+                client_id, "CONNECT", ip_address, port);
 
             txn.commit();
             return true;
@@ -103,10 +91,9 @@ namespace tinymq
             pqxx::connection conn(connection_string_);
             pqxx::work txn(conn);
 
-            // Get the last known IP and port
-            auto result = txn.exec(
+            auto result = exec_params(txn,
                 "SELECT last_ip, last_port FROM clients WHERE client_id = $1",
-                pqxx::params(client_id));
+                client_id);
 
             if (result.empty())
             {
@@ -118,11 +105,10 @@ namespace tinymq
             std::string ip = result[0]["last_ip"].as<std::string>();
             int port = result[0]["last_port"].as<int>();
 
-            // Log the disconnect event
-            txn.exec(
+            exec_params(txn,
                 "INSERT INTO connection_events (client_id, event_type, ip_address, port) "
                 "VALUES ($1, 'DISCONNECT', $2, $3)",
-                pqxx::params(client_id, ip, port));
+                client_id, ip, port);
 
             txn.commit();
             return true;
@@ -170,9 +156,9 @@ namespace tinymq
 
             if (!topic_exists(txn, pure_topic_name))
             {
-                txn.exec(
+                exec_params(txn,
                     "INSERT INTO topics (name, owner_client_id) VALUES ($1, $2)",
-                    pqxx::params(pure_topic_name, owner_client_id));
+                    pure_topic_name, owner_client_id);
 
                 txn.commit();
                 ui::print_message("Database", "Tópico registrado en la base de datos: " + pure_topic_name,
@@ -219,10 +205,9 @@ namespace tinymq
             pqxx::connection conn(connection_string_);
             pqxx::work txn(conn);
 
-            // Verificar si el tópico existe y si el cliente es el propietario
-            auto result = txn.exec(
+            auto result = exec_params(txn,
                 "SELECT id FROM topics WHERE name = $1 AND owner_client_id = $2",
-                pqxx::params(pure_topic_name, owner_client_id));
+                pure_topic_name, owner_client_id);
 
             if (result.empty())
             {
@@ -232,10 +217,9 @@ namespace tinymq
                 return false;
             }
 
-            // Actualizar el estado de publicación
-            txn.exec(
+            exec_params(txn,
                 "UPDATE topics SET publish = $1 WHERE name = $2 AND owner_client_id = $3",
-                pqxx::params(publish, pure_topic_name, owner_client_id));
+                publish, pure_topic_name, owner_client_id);
 
             txn.commit();
             ui::print_message("Database",
@@ -279,9 +263,9 @@ namespace tinymq
             pqxx::connection conn(connection_string_);
             pqxx::work txn(conn);
 
-            auto result = txn.exec(
+            auto result = exec_params(txn,
                 "SELECT id FROM topics WHERE name = $1",
-                pqxx::params(pure_topic_name));
+                pure_topic_name);
 
             if (result.empty())
             {
@@ -313,10 +297,9 @@ namespace tinymq
                 return false;
             }
 
-            // Check if topic exists
-            auto topic_result = txn.exec(
+            auto topic_result = exec_params(txn,
                 "SELECT name FROM topics WHERE id = $1",
-                pqxx::params(topic_id));
+                topic_id);
 
             if (topic_result.empty())
             {
@@ -324,10 +307,9 @@ namespace tinymq
                 return false;
             }
 
-            // Check if subscription already exists
-            auto sub_result = txn.exec(
+            auto sub_result = exec_params(txn,
                 "SELECT id, active FROM subscriptions WHERE client_id = $1 AND topic_id = $2",
-                pqxx::params(client_id, topic_id));
+                client_id, topic_id);
 
             if (!sub_result.empty())
             {
@@ -335,19 +317,17 @@ namespace tinymq
                 bool active = sub_result[0]["active"].as<bool>();
                 if (!active)
                 {
-                    // Reactivate it
-                    txn.exec(
+                    exec_params(txn,
                         "UPDATE subscriptions SET active = TRUE, subscribed_at = CURRENT_TIMESTAMP "
                         "WHERE client_id = $1 AND topic_id = $2",
-                        pqxx::params(client_id, topic_id));
+                        client_id, topic_id);
                 }
             }
             else
             {
-                // Create new subscription
-                txn.exec(
+                exec_params(txn,
                     "INSERT INTO subscriptions (client_id, topic_id) VALUES ($1, $2)",
-                    pqxx::params(client_id, topic_id));
+                    client_id, topic_id);
             }
 
             txn.commit();
@@ -369,10 +349,10 @@ namespace tinymq
             pqxx::connection conn(connection_string_);
             pqxx::work txn(conn);
 
-            auto result = txn.exec(
+            exec_params(txn,
                 "UPDATE subscriptions SET active = FALSE "
                 "WHERE client_id = $1 AND topic_id = $2",
-                pqxx::params(client_id, topic_id));
+                client_id, topic_id);
 
             txn.commit();
             return true;
@@ -396,10 +376,10 @@ namespace tinymq
             pqxx::connection conn(connection_string_);
             pqxx::work txn(conn);
 
-            txn.exec(
+            exec_params(txn,
                 "INSERT INTO message_logs (publisher_client_id, topic_id, payload_size, payload_preview) "
                 "VALUES ($1, $2, $3, $4)",
-                pqxx::params(publisher_client_id, topic_id, static_cast<int>(payload_size), payload_preview));
+                publisher_client_id, topic_id, static_cast<int>(payload_size), payload_preview);
 
             txn.commit();
             return true;
@@ -414,17 +394,17 @@ namespace tinymq
 
     bool DbManager::client_exists(pqxx::work &txn, const std::string &client_id)
     {
-        auto result = txn.exec(
+        auto result = exec_params(txn,
             "SELECT 1 FROM clients WHERE client_id = $1",
-            pqxx::params(client_id));
+            client_id);
         return !result.empty();
     }
 
     bool DbManager::topic_exists(pqxx::work &txn, const std::string &topic_name)
     {
-        auto result = txn.exec(
+        auto result = exec_params(txn,
             "SELECT 1 FROM topics WHERE name = $1",
-            pqxx::params(topic_name));
+            topic_name);
         return !result.empty();
     }
 
@@ -438,7 +418,7 @@ namespace tinymq
             {
                 pqxx::connection conn(connection_string_);
                 pqxx::work txn(conn);
-                auto result = txn.exec(
+                auto result = exec_params(txn,
                     "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'clients')");
 
                 if (result[0][0].as<bool>())
@@ -488,13 +468,13 @@ namespace tinymq
             pqxx::connection conn(connection_string_);
             pqxx::work txn(conn);
 
-            auto result = txn.exec(
+            auto result = exec_params(txn,
                 "SELECT t.name, t.owner_client_id "
                 "FROM topics t "
                 "WHERE t.publish = TRUE "
                 "ORDER BY t.name");
 
-            for (auto row : result)
+            for (const auto &row : result)
             {
                 std::string name = row["name"].as<std::string>();
                 std::string owner = row["owner_client_id"].as<std::string>();
@@ -522,7 +502,7 @@ namespace tinymq
 
             std::string status_filter = only_pending ? " AND ar.status = 'pending'" : "";
 
-            pqxx::result result = txn.exec(
+            pqxx::result result = exec_params(txn,
                 "SELECT ar.id, t.name as topic, ar.requester_client_id, ar.status, "
                 "EXTRACT(EPOCH FROM ar.request_timestamp) as request_time "
                 "FROM admin_requests ar "
@@ -530,7 +510,7 @@ namespace tinymq
                 "WHERE t.owner_client_id = $1" +
                     status_filter + " "
                                     "ORDER BY ar.request_timestamp DESC",
-                pqxx::params(owner_id));
+                owner_id);
 
             for (auto row : result)
             {
@@ -571,11 +551,10 @@ namespace tinymq
                 return false;
             }
 
-            // Comprobar si ya existe una solicitud pendiente para este usuario y tópico
-            pqxx::result check_result = txn.exec(
+            pqxx::result check_result = exec_params(txn,
                 "SELECT id FROM admin_requests "
                 "WHERE topic_id = $1 AND requester_client_id = $2 AND status = 'pending'",
-                pqxx::params(topic_id, requester_id));
+                topic_id, requester_id);
 
             if (!check_result.empty())
             {
@@ -585,11 +564,10 @@ namespace tinymq
                 return true; // No es un error, la solicitud ya existe
             }
 
-            // Insertar nueva solicitud
-            pqxx::result result = txn.exec(
+            pqxx::result result = exec_params(txn,
                 "INSERT INTO admin_requests (topic_id, requester_client_id, status, request_timestamp) "
                 "VALUES ($1, $2, 'pending', NOW()) RETURNING id",
-                pqxx::params(topic_id, requester_id));
+                topic_id, requester_id);
 
             txn.commit();
 
@@ -616,10 +594,9 @@ namespace tinymq
             pqxx::connection conn(connection_string_);
             pqxx::work txn(conn);
 
-            // Verificar que el tópico existe y el dueño es correcto
-            auto topic_result = txn.exec(
+            auto topic_result = exec_params(txn,
                 "SELECT id FROM topics WHERE name = $1 AND owner_client_id = $2",
-                pqxx::params(topic_name, owner_id));
+                topic_name, owner_id);
 
             if (topic_result.empty())
             {
@@ -633,12 +610,12 @@ namespace tinymq
 
             // Actualizar estado de solicitud
             std::string status = approved ? "approved" : "rejected";
-            auto update_result = txn.exec(
+            auto update_result = exec_params(txn,
                 "UPDATE admin_requests "
                 "SET status = $1, response_timestamp = NOW() "
                 "WHERE topic_id = $2 AND requester_client_id = $3 AND status = 'pending' "
                 "RETURNING id",
-                pqxx::params(status, topic_id, requester_id));
+                status, topic_id, requester_id);
 
             if (update_result.empty())
             {
@@ -651,16 +628,14 @@ namespace tinymq
             // Si fue aprobada, añadir a tabla de administradores
             if (approved)
             {
-                // Eliminar cualquier administrador existente para este tópico
-                txn.exec(
+                exec_params(txn,
                     "DELETE FROM topic_admins WHERE topic_id = $1",
-                    pqxx::params(topic_id));
+                    topic_id);
 
-                // Insertar nuevo administrador
-                txn.exec(
+                exec_params(txn,
                     "INSERT INTO topic_admins (topic_id, admin_client_id) "
                     "VALUES ($1, $2)",
-                    pqxx::params(topic_id, requester_id));
+                    topic_id, requester_id);
             }
 
             txn.commit();
@@ -689,10 +664,9 @@ namespace tinymq
             pqxx::connection conn(connection_string_);
             pqxx::work txn(conn);
 
-            // Verificar que el tópico existe y el dueño es correcto
-            auto topic_result = txn.exec(
+            auto topic_result = exec_params(txn,
                 "SELECT id FROM topics WHERE name = $1 AND owner_client_id = $2",
-                pqxx::params(topic_name, owner_id));
+                topic_name, owner_id);
 
             if (topic_result.empty())
             {
@@ -704,12 +678,11 @@ namespace tinymq
 
             int topic_id = topic_result[0]["id"].as<int>();
 
-            // Eliminar de tabla de administradores
-            auto delete_result = txn.exec(
+            auto delete_result = exec_params(txn,
                 "DELETE FROM topic_admins "
                 "WHERE topic_id = $1 AND admin_client_id = $2 "
                 "RETURNING topic_id",
-                pqxx::params(topic_id, admin_id));
+                topic_id, admin_id);
 
             if (delete_result.empty())
             {
@@ -743,22 +716,20 @@ namespace tinymq
             pqxx::connection conn(connection_string_);
             pqxx::work txn(conn);
 
-            // Verificar si el usuario es dueño del tópico
-            auto owner_result = txn.exec(
+            auto owner_result = exec_params(txn,
                 "SELECT 1 FROM topics WHERE name = $1 AND owner_client_id = $2",
-                pqxx::params(topic_name, client_id));
+                topic_name, client_id);
 
             if (!owner_result.empty())
             {
                 return true; // El dueño siempre es administrador
             }
 
-            // Verificar si es administrador adicional
-            auto admin_result = txn.exec(
+            auto admin_result = exec_params(txn,
                 "SELECT 1 FROM topic_admins ta "
                 "JOIN topics t ON ta.topic_id = t.id "
                 "WHERE t.name = $1 AND ta.admin_client_id = $2",
-                pqxx::params(topic_name, client_id));
+                topic_name, client_id);
 
             return !admin_result.empty();
         }
@@ -789,10 +760,9 @@ namespace tinymq
                 return false;
             }
 
-            // Obtener ID del tópico
-            auto topic_result = txn.exec(
+            auto topic_result = exec_params(txn,
                 "SELECT id FROM topics WHERE name = $1",
-                pqxx::params(topic_name));
+                topic_name);
 
             if (topic_result.empty())
             {
@@ -804,13 +774,12 @@ namespace tinymq
 
             int topic_id = topic_result[0]["id"].as<int>();
 
-            // Insertar o actualizar configuración del sensor
-            txn.exec(
+            exec_params(txn,
                 "INSERT INTO admin_sensor_config (topic_id, sensor_name, active, set_by, updated_at) "
                 "VALUES ($1, $2, $3, $4, NOW()) "
                 "ON CONFLICT (topic_id, sensor_name) DO UPDATE "
                 "SET active = $3, set_by = $4, updated_at = NOW()",
-                pqxx::params(topic_id, sensor_name, active, client_id));
+                topic_id, sensor_name, active, client_id);
 
             txn.commit();
 

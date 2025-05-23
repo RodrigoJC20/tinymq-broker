@@ -457,13 +457,25 @@ namespace tinymq
                 if (preview_size > 0)
                 {
                     preview = std::string(message.begin(), message.begin() + preview_size);
-                    if (message.size() > 20)
+                    if (message.size() > 50)
                     {
                         preview += "...";
                     }
                 }
 
-                db_manager_->log_message(publisher_client_id, topic_id, message.size(), preview);
+                // Create a larger preview for DB (50 chars)
+                std::string preview_large;
+                size_t preview_large_size = std::min(message.size(), static_cast<size_t>(100));
+                if (preview_large_size > 0)
+                {
+                    preview_large = std::string(message.begin(), message.begin() + preview_large_size);
+                    if (message.size() > 100)
+                    {
+                        preview_large += "...";
+                    }
+                }
+
+                db_manager_->log_message(publisher_client_id, topic_id, message.size(), preview_large);
             }
         }
 
