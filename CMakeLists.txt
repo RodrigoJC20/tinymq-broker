@@ -20,7 +20,6 @@ target_link_libraries(tinymq_broker PRIVATE
     ${Boost_LIBRARIES} 
     ${PostgreSQL_LIBRARIES}
     ${PQXX_LDFLAGS}
-    pq
 )
 
 file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/db)

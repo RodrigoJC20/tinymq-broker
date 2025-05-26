@@ -29,6 +29,9 @@ namespace tinymq
         void handle_topic_request(const Packet &packet);
         void send_topic_list(const std::vector<std::pair<std::string, std::string>> &topics);
 
+        // Force disconnect the client
+        void disconnect();
+
     private:
         void read_header();
 

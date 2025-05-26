@@ -10,7 +10,8 @@ CREATE TABLE clients (
     last_connected TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     last_ip VARCHAR(45),  -- Can store IPv6 addresses
     last_port INTEGER,
-    connection_count INTEGER DEFAULT 1
+    connection_count INTEGER DEFAULT 1,
+    active BOOLEAN DEFAULT FALSE
 );
 
 -- Topics table

@@ -305,4 +305,22 @@ namespace tinymq
             });
     }
 
+    void Session::disconnect()
+    {
+        try
+        {
+            if (socket_.is_open())
+            {
+                ui::print_message("Session", "Forcefully closing connection for client: " + client_id_, 
+                                  ui::MessageType::WARNING);
+                socket_.close();
+            }
+        }
+        catch (const std::exception& e)
+        {
+            ui::print_message("Session", "Error closing socket: " + std::string(e.what()), 
+                              ui::MessageType::ERROR);
+        }
+    }
+
 } // namespace tinymq

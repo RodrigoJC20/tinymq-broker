@@ -39,6 +39,8 @@ namespace tinymq
 
     private:
         void accept_connections();
+        void start_client_activity_check();
+        void check_client_activity();
 
         // Helper to extract client ID from topic name
         std::string extract_client_id_from_topic(const std::string &topic);
@@ -60,6 +62,9 @@ namespace tinymq
         std::unique_ptr<DbManager> db_manager_;
         std::unordered_map<std::string, int> topic_id_cache_; // topic name -> DB topic ID
         std::mutex topic_cache_mutex_;
+
+        // Client activity monitoring
+        std::unique_ptr<boost::asio::steady_timer> activity_timer_;
     };
 
 } // namespace tinymq

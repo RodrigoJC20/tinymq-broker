@@ -44,6 +44,9 @@ namespace tinymq
                          size_t payload_size,
                          const std::string &payload_preview);
 
+        // Check if clients are active in the database
+        std::vector<std::string> get_inactive_clients(const std::vector<std::string> &client_ids);
+
         // Initialize the database with the schema if not already set up
         bool setup_schema();
 
