@@ -1,94 +1,154 @@
--- TinyMQ Broker PostgreSQL Schema
+-- public.clients definition
 
--- Create schema if not exists
-CREATE SCHEMA IF NOT EXISTS public;
+-- Drop table
 
--- Clients table
-CREATE TABLE clients (
-    id SERIAL PRIMARY KEY,
-    client_id VARCHAR(255) UNIQUE NOT NULL,
-    last_connected TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    last_ip VARCHAR(45),  -- Can store IPv6 addresses
-    last_port INTEGER,
-    connection_count INTEGER DEFAULT 1,
-    active BOOLEAN DEFAULT FALSE
+-- DROP TABLE public.clients;
+
+CREATE TABLE public.clients (
+	id serial4 NOT NULL,
+	client_id varchar(255) NOT NULL,
+	last_connected timestamptz DEFAULT CURRENT_TIMESTAMP NULL,
+	last_ip varchar(45) NULL,
+	last_port int4 NULL,
+	connection_count int4 DEFAULT 1 NULL,
+	active bool DEFAULT true NULL,
+	CONSTRAINT clients_client_id_key UNIQUE (client_id),
+	CONSTRAINT clients_pkey PRIMARY KEY (id)
 );
 
--- Topics table
-CREATE TABLE topics (
-    id SERIAL PRIMARY KEY,
-    name VARCHAR(255) UNIQUE NOT NULL,
-    owner_client_id VARCHAR(255) NOT NULL REFERENCES clients(client_id),
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    publish BOOLEAN DEFAULT FALSE
+
+-- public.connection_events definition
+
+-- Drop table
+
+-- DROP TABLE public.connection_events;
+
+CREATE TABLE public.connection_events (
+	id serial4 NOT NULL,
+	client_id varchar(255) NOT NULL,
+	event_type varchar(20) NOT NULL,
+	ip_address varchar(45) NULL,
+	port int4 NULL,
+	"timestamp" timestamptz DEFAULT CURRENT_TIMESTAMP NULL,
+	CONSTRAINT connection_events_pkey PRIMARY KEY (id),
+	CONSTRAINT connection_events_client_id_fkey FOREIGN KEY (client_id) REFERENCES public.clients(client_id)
+);
+CREATE INDEX idx_connection_events_client ON public.connection_events USING btree (client_id);
+
+
+-- public.topics definition
+
+-- Drop table
+
+-- DROP TABLE public.topics;
+
+CREATE TABLE public.topics (
+	id serial4 NOT NULL,
+	"name" varchar(255) NOT NULL,
+	owner_client_id varchar(255) NOT NULL,
+	created_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL,
+	publish bool DEFAULT false NULL,
+	CONSTRAINT topics_name_key UNIQUE (name),
+	CONSTRAINT topics_pkey PRIMARY KEY (id),
+	CONSTRAINT topics_owner_client_id_fkey FOREIGN KEY (owner_client_id) REFERENCES public.clients(client_id)
+);
+CREATE INDEX idx_topics_owner ON public.topics USING btree (owner_client_id);
+
+
+-- public.admin_requests definition
+
+-- Drop table
+
+-- DROP TABLE public.admin_requests;
+
+CREATE TABLE public.admin_requests (
+	id serial4 NOT NULL,
+	topic_id int4 NULL,
+	requester_client_id text NULL,
+	status text NULL,
+	request_timestamp timestamp DEFAULT CURRENT_TIMESTAMP NULL,
+	response_timestamp timestamp NULL,
+	CONSTRAINT admin_requests_pkey PRIMARY KEY (id),
+	CONSTRAINT admin_requests_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'approved'::text, 'rejected'::text, 'revoked'::text]))),
+	CONSTRAINT admin_requests_topic_id_requester_client_id_key UNIQUE (topic_id, requester_client_id),
+	CONSTRAINT admin_requests_requester_client_id_fkey FOREIGN KEY (requester_client_id) REFERENCES public.clients(client_id),
+	CONSTRAINT admin_requests_topic_id_fkey FOREIGN KEY (topic_id) REFERENCES public.topics(id)
 );
 
--- Subscriptions table - tracks who is subscribed to what
-CREATE TABLE subscriptions (
-    id SERIAL PRIMARY KEY,
-    client_id VARCHAR(255) NOT NULL REFERENCES clients(client_id),
-    topic_id INTEGER NOT NULL REFERENCES topics(id),
-    subscribed_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    active BOOLEAN DEFAULT TRUE,
-    UNIQUE (client_id, topic_id)
+
+-- public.admin_sensor_config definition
+
+-- Drop table
+
+-- DROP TABLE public.admin_sensor_config;
+
+CREATE TABLE public.admin_sensor_config (
+	topic_id int4 NOT NULL,
+	sensor_name text NOT NULL,
+	active bool DEFAULT true NULL,
+	set_by text NULL,
+	updated_at timestamp DEFAULT CURRENT_TIMESTAMP NULL,
+	activable bool DEFAULT false NULL,
+	CONSTRAINT admin_sensor_config_pkey PRIMARY KEY (topic_id, sensor_name),
+	CONSTRAINT admin_sensor_config_set_by_fkey FOREIGN KEY (set_by) REFERENCES public.clients(client_id),
+	CONSTRAINT admin_sensor_config_topic_id_fkey FOREIGN KEY (topic_id) REFERENCES public.topics(id)
 );
 
--- Message log table - tracks all published messages
-CREATE TABLE message_logs (
-    id SERIAL PRIMARY KEY,
-    publisher_client_id VARCHAR(255) NOT NULL REFERENCES clients(client_id),
-    topic_id INTEGER NOT NULL REFERENCES topics(id),
-    payload_size INTEGER NOT NULL,
-    payload_preview VARCHAR(100),
-    published_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);
 
--- Connection events - tracks connects/disconnects
-CREATE TABLE connection_events (
-    id SERIAL PRIMARY KEY,
-    client_id VARCHAR(255) NOT NULL REFERENCES clients(client_id),
-    event_type VARCHAR(20) NOT NULL, -- 'CONNECT', 'DISCONNECT'
-    ip_address VARCHAR(45),
-    port INTEGER,
-    timestamp TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);
+-- public.message_logs definition
 
--- Solicitudes de administración
-CREATE TABLE admin_requests (
-  id SERIAL PRIMARY KEY,
-  topic_id INTEGER REFERENCES topics(id),
-  requester_client_id TEXT REFERENCES clients(client_id),
-  status TEXT CHECK (status IN ('pending', 'approved', 'rejected')),
-  request_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  response_timestamp TIMESTAMP,
-  UNIQUE(topic_id, requester_client_id)
-);
+-- Drop table
 
--- Administradores activos (solo puede haber uno adicional por tópico)
-CREATE TABLE topic_admins (
-  topic_id INTEGER REFERENCES topics(id),
-  admin_client_id TEXT REFERENCES clients(client_id),
-  granted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (topic_id, admin_client_id)
-);
+-- DROP TABLE public.message_logs;
 
--- Configuración de sensores por administrador
-CREATE TABLE admin_sensor_config (
-  topic_id INTEGER REFERENCES topics(id),
-  sensor_name TEXT,
-  active BOOLEAN DEFAULT TRUE,
-  set_by TEXT REFERENCES clients(client_id),
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (topic_id, sensor_name)
+CREATE TABLE public.message_logs (
+	id serial4 NOT NULL,
+	publisher_client_id varchar(255) NOT NULL,
+	topic_id int4 NOT NULL,
+	payload_size int4 NOT NULL,
+	payload_preview varchar(500) NULL,
+	published_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL,
+	CONSTRAINT message_logs_pkey PRIMARY KEY (id),
+	CONSTRAINT message_logs_publisher_client_id_fkey FOREIGN KEY (publisher_client_id) REFERENCES public.clients(client_id),
+	CONSTRAINT message_logs_topic_id_fkey FOREIGN KEY (topic_id) REFERENCES public.topics(id)
 );
+CREATE INDEX idx_message_logs_publisher ON public.message_logs USING btree (publisher_client_id);
+CREATE INDEX idx_message_logs_topic ON public.message_logs USING btree (topic_id);
 
--- Create indexes for better query performance
-CREATE INDEX idx_topics_owner ON topics(owner_client_id);
-CREATE INDEX idx_subscriptions_client ON subscriptions(client_id);
-CREATE INDEX idx_subscriptions_topic ON subscriptions(topic_id);
-CREATE INDEX idx_message_logs_publisher ON message_logs(publisher_client_id);
-CREATE INDEX idx_message_logs_topic ON message_logs(topic_id);
-CREATE INDEX idx_connection_events_client ON connection_events(client_id);
-CREATE INDEX idx_admin_requests_requester ON admin_requests(requester_client_id);
-CREATE INDEX idx_admin_requests_topic ON admin_requests(topic_id);
-CREATE INDEX idx_topic_admins_admin ON topic_admins(admin_client_id);
+
+-- public.subscriptions definition
+
+-- Drop table
+
+-- DROP TABLE public.subscriptions;
+
+CREATE TABLE public.subscriptions (
+	id serial4 NOT NULL,
+	client_id varchar(255) NOT NULL,
+	topic_id int4 NOT NULL,
+	subscribed_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL,
+	active bool DEFAULT true NULL,
+	CONSTRAINT subscriptions_client_id_topic_id_key UNIQUE (client_id, topic_id),
+	CONSTRAINT subscriptions_pkey PRIMARY KEY (id),
+	CONSTRAINT subscriptions_client_id_fkey FOREIGN KEY (client_id) REFERENCES public.clients(client_id),
+	CONSTRAINT subscriptions_topic_id_fkey FOREIGN KEY (topic_id) REFERENCES public.topics(id)
+);
+CREATE INDEX idx_subscriptions_client ON public.subscriptions USING btree (client_id);
+CREATE INDEX idx_subscriptions_topic ON public.subscriptions USING btree (topic_id);
+
+
+-- public.topic_admins definition
+
+-- Drop table
+
+-- DROP TABLE public.topic_admins;
+
+CREATE TABLE public.topic_admins (
+	topic_id int4 NOT NULL,
+	admin_client_id text NOT NULL,
+	granted_at timestamp DEFAULT CURRENT_TIMESTAMP NULL,
+	CONSTRAINT topic_admins_pkey PRIMARY KEY (topic_id, admin_client_id),
+	CONSTRAINT topic_admins_admin_client_id_fkey FOREIGN KEY (admin_client_id) REFERENCES public.clients(client_id),
+	CONSTRAINT topic_admins_topic_id_fkey FOREIGN KEY (topic_id) REFERENCES public.topics(id)
+);
+CREATE INDEX idx_topic_admins_admin ON public.topic_admins USING btree (admin_client_id);

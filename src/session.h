@@ -32,19 +32,31 @@ namespace tinymq
         // Force disconnect the client
         void disconnect();
 
+        void handle_admin_request(const Packet &packet);
+
+        // Métodos de administración - DECLARAR SOLO UNA VEZ
+        void handle_admin_response(const Packet &packet);
+        void handle_admin_list_request(const Packet &packet);
+        void handle_my_topics_request(const Packet &packet);
+        void handle_my_admin_requests(const Packet &packet);
+
+        // Métodos para nueva funcionalidad de administración
+        void handle_my_admin_topics_request(const Packet &packet);
+        void handle_admin_resignation(const Packet &packet);
+        void handle_topic_sensors_request(const Packet &packet);
+
+        void send_ack(PacketType ack_type, uint16_t packet_id = 0);
+
     private:
         void read_header();
-
         void read_payload(PacketHeader header);
-
         void process_packet(const Packet &packet);
 
+        // Métodos principales de manejo de paquetes
         void handle_connect(const Packet &packet);
         void handle_publish(const Packet &packet);
         void handle_subscribe(const Packet &packet);
         void handle_unsubscribe(const Packet &packet);
-
-        void send_ack(PacketType ack_type, uint16_t packet_id = 0);
 
     private:
         boost::asio::ip::tcp::socket socket_;
@@ -55,4 +67,4 @@ namespace tinymq
         static constexpr size_t header_length = 4;
     };
 
-} // namespace tinymq
+}
