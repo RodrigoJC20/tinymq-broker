@@ -11,6 +11,7 @@ CREATE TABLE public.clients (
 	last_ip varchar(45) NULL,
 	last_port int4 NULL,
 	connection_count int4 DEFAULT 1 NULL,
+	active bool DEFAULT true NULL,
 	CONSTRAINT clients_client_id_key UNIQUE (client_id),
 	CONSTRAINT clients_pkey PRIMARY KEY (id)
 );
