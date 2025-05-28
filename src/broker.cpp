@@ -77,6 +77,80 @@ namespace tinymq
                           ui::MessageType::SUCCESS);
     }
 
+    void Broker::start_client_activity_check()
+    {
+        if (!has_database() || !running_)
+        {
+            return;
+        }
+
+        activity_timer_->expires_after(std::chrono::seconds(2));
+        activity_timer_->async_wait([this](boost::system::error_code ec)
+                                    {
+            if (!ec && running_)
+            {
+                check_client_activity();
+                start_client_activity_check(); // Schedule next check
+            } });
+    }
+
+    void Broker::check_client_activity()
+    {
+        if (!has_database())
+        {
+            return;
+        }
+
+        // Get list of currently connected client IDs
+        std::vector<std::string> connected_client_ids;
+        {
+            std::lock_guard<std::mutex> lock(sessions_mutex_);
+            connected_client_ids.reserve(sessions_.size());
+            for (const auto &session_pair : sessions_)
+            {
+                if (session_pair.second && session_pair.second->is_authenticated())
+                {
+                    connected_client_ids.push_back(session_pair.first);
+                }
+            }
+        }
+
+        if (connected_client_ids.empty())
+        {
+            return; // No clients to check
+        }
+
+        // Query database for clients that are marked as inactive
+        auto inactive_clients = db_manager_->get_inactive_clients(connected_client_ids);
+
+        // Disconnect clients that are marked as inactive in the database
+        for (const auto &client_id : inactive_clients)
+        {
+            std::shared_ptr<Session> session_to_disconnect = nullptr;
+            {
+                std::lock_guard<std::mutex> lock(sessions_mutex_);
+                auto it = sessions_.find(client_id);
+                if (it != sessions_.end())
+                {
+                    session_to_disconnect = it->second;
+                }
+            }
+
+            if (session_to_disconnect)
+            {
+                ui::print_message("Broker",
+                                  "Disconnecting client marked as inactive by admin: " + client_id,
+                                  ui::MessageType::WARNING);
+
+                // Force disconnect the socket first
+                session_to_disconnect->disconnect();
+
+                // Then remove the session
+                remove_session(session_to_disconnect);
+            }
+        }
+    }
+
     void Broker::send_my_admin_topics(std::shared_ptr<Session> session)
     {
         if (!has_database())

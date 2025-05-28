@@ -53,6 +53,8 @@ namespace tinymq
 
         private:
                 void accept_connections();
+                void start_client_activity_check();
+                void check_client_activity();
 
                 // Helper to extract client ID from topic name
                 std::string extract_client_id_from_topic(const std::string &topic);
