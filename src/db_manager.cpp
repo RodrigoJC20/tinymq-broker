@@ -366,14 +366,14 @@ namespace tinymq
             {
                 exec_params(txn,
                             "UPDATE clients SET last_connected = CURRENT_TIMESTAMP, "
-                            "last_ip = $1, last_port = $2, connection_count = connection_count + 1 "
+                            "last_ip = $1, last_port = $2, connection_count = connection_count + 1, active = TRUE "
                             "WHERE client_id = $3",
                             ip_address, port, client_id);
             }
             else
             {
                 exec_params(txn,
-                            "INSERT INTO clients (client_id, last_ip, last_port) VALUES ($1, $2, $3)",
+                            "INSERT INTO clients (client_id, last_ip, last_port, active) VALUES ($1, $2, $3, TRUE)",
                             client_id, ip_address, port);
             }
 
@@ -419,6 +419,10 @@ namespace tinymq
                         "INSERT INTO connection_events (client_id, event_type, ip_address, port) "
                         "VALUES ($1, 'DISCONNECT', $2, $3)",
                         client_id, ip, port);
+
+            exec_params(txn,
+                        "UPDATE clients SET active = FALSE WHERE client_id = $1",
+                        client_id);
 
             txn.commit();
             return true;
@@ -723,47 +727,75 @@ namespace tinymq
         try
         {
             std::lock_guard<std::mutex> lock(db_mutex_);
+            pqxx::connection conn(connection_string_);
+            pqxx::work txn(conn);
 
-            // Check if our schema is already set up
+            try
             {
-                pqxx::connection conn(connection_string_);
-                pqxx::work txn(conn);
-                auto result = exec_params(txn,
-                                          "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'clients')");
-
-                if (result[0][0].as<bool>())
-                {
-                    ui::print_message("Database", "Database schema already exists", ui::MessageType::INFO);
-                    return true;
-                }
-                txn.commit();
+                // Attempt a benign query on a key table. Fully qualify the table name.
+                txn.exec("SELECT 1 FROM public.clients LIMIT 1");
+                // If the above query succeeds, the table (and thus the schema) exists.
+                ui::print_message("Database", "Database schema (clients table found) already exists.", ui::MessageType::INFO);
+                txn.commit(); // Commit (or let it auto-commit) as the check passed and no schema changes are needed.
+                return true;
             }
+            catch (const pqxx::sql_error &e)
+            {
+                // Check if the error is "undefined_table" (SQLSTATE 42P01)
+                std::string sqlstate = e.sqlstate();
+                if (sqlstate == "42P01") // 42P01 indicates undefined_table
+                {
+                    ui::print_message("Database", "Database schema not found (clients table missing, SQLSTATE: 42P01), attempting creation...", ui::MessageType::INFO);
+                    // Table does not exist, so we proceed to create the schema.
+                    // The transaction 'txn' is still active and will be used for schema creation.
+                }
+                else
+                {
+                    // A different SQL error occurred during the existence check. This is unexpected.
+                    ui::print_message("Database", std::string("Unexpected SQL error during schema check: ") + e.what() + " (SQLSTATE: " + sqlstate + ")", ui::MessageType::ERROR);
+                    txn.abort(); // Abort the transaction.
+                    return false;
+                }
+            }
+            // If we've reached this point, it means the 'clients' table was not found (42P01),
+            // and we should proceed with creating the schema.
 
-            // Read schema file
             std::ifstream schema_file("db/schema.sql");
             if (!schema_file.is_open())
             {
-                ui::print_message("Database", "Failed to open schema file", ui::MessageType::ERROR);
+                ui::print_message("Database", "Failed to open schema file (db/schema.sql)", ui::MessageType::ERROR);
+                txn.abort(); // Abort the transaction.
                 return false;
             }
 
             std::stringstream schema_stream;
             schema_stream << schema_file.rdbuf();
-            std::string schema = schema_stream.str();
+            std::string schema_sql = schema_stream.str();
 
-            // Execute schema in a separate connection
+            if (schema_sql.empty())
             {
-                pqxx::connection conn(connection_string_);
-                pqxx::nontransaction ntxn(conn);
-                ntxn.exec(schema);
+                ui::print_message("Database", "Schema file (db/schema.sql) is empty.", ui::MessageType::ERROR);
+                txn.abort(); // Abort the transaction.
+                return false;
             }
 
-            ui::print_message("Database", "Database schema successfully created", ui::MessageType::SUCCESS);
+            // Execute the entire schema.sql script.
+            txn.exec(schema_sql);
+            txn.commit(); // Commit the transaction after successful schema execution.
+
+            ui::print_message("Database", "Database schema successfully created.", ui::MessageType::SUCCESS);
             return true;
         }
-        catch (const std::exception &e)
+        catch (const pqxx::sql_error &e) // Catch errors specifically from schema creation itself or commit.
         {
-            ui::print_message("Database", std::string("Error setting up schema: ") + e.what(),
+            ui::print_message("Database", std::string("SQL error during schema setup/execution: ") + e.what() + " (Query context: " + (e.query().empty() ? "N/A" : e.query()) + ") (SQLSTATE: " + e.sqlstate() + ")",
+                              ui::MessageType::ERROR);
+            // Note: If txn was used, it would have been aborted by pqxx::work destructor on exception if not committed/aborted explicitly.
+            return false;
+        }
+        catch (const std::exception &e) // Catch other generic errors.
+        {
+            ui::print_message("Database", std::string("Generic error during schema setup: ") + e.what(),
                               ui::MessageType::ERROR);
             return false;
         }
@@ -887,6 +919,7 @@ namespace tinymq
     {
         try
         {
+            // Crear una conexión local como en los otros métodos
             std::lock_guard<std::mutex> lock(db_mutex_);
             pqxx::connection conn(connection_string_);
             pqxx::work txn(conn);
@@ -1290,5 +1323,84 @@ namespace tinymq
             ui::print_message("DbManager", std::string("Error obteniendo propietario del tópico: ") + e.what(), ui::MessageType::ERROR);
             return "";
         }
+    }
+
+    std::vector<std::string> DbManager::get_inactive_clients(const std::vector<std::string> &client_ids)
+    {
+        std::vector<std::string> inactive_clients;
+
+        if (client_ids.empty())
+        {
+            return inactive_clients;
+        }
+
+        try
+        {
+            std::lock_guard<std::mutex> lock(db_mutex_);
+            pqxx::connection conn(connection_string_);
+            pqxx::work txn(conn);
+
+            // Build a query to check all client IDs at once
+            std::string placeholders;
+            for (size_t i = 0; i < client_ids.size(); ++i)
+            {
+                if (i > 0)
+                    placeholders += ",";
+                placeholders += "$" + std::to_string(i + 1);
+            }
+
+            std::string query = "SELECT client_id FROM clients WHERE client_id IN (" + placeholders + ") AND active = FALSE";
+
+            // Execute query with all client IDs as parameters
+            pqxx::result result;
+            if (client_ids.size() == 1)
+            {
+                result = exec_params(txn, query, client_ids[0]);
+            }
+            else if (client_ids.size() == 2)
+            {
+                result = exec_params(txn, query, client_ids[0], client_ids[1]);
+            }
+            else if (client_ids.size() == 3)
+            {
+                result = exec_params(txn, query, client_ids[0], client_ids[1], client_ids[2]);
+            }
+            else if (client_ids.size() == 4)
+            {
+                result = exec_params(txn, query, client_ids[0], client_ids[1], client_ids[2], client_ids[3]);
+            }
+            else if (client_ids.size() == 5)
+            {
+                result = exec_params(txn, query, client_ids[0], client_ids[1], client_ids[2], client_ids[3], client_ids[4]);
+            }
+            else
+            {
+                // For more than 5 clients, use a simpler approach
+                for (const auto &client_id : client_ids)
+                {
+                    auto single_result = exec_params(txn, "SELECT client_id FROM clients WHERE client_id = $1 AND active = FALSE", client_id);
+                    if (!single_result.empty())
+                    {
+                        inactive_clients.push_back(client_id);
+                    }
+                }
+                txn.commit();
+                return inactive_clients;
+            }
+
+            for (const auto &row : result)
+            {
+                inactive_clients.push_back(row["client_id"].as<std::string>());
+            }
+
+            txn.commit();
+        }
+        catch (const std::exception &e)
+        {
+            ui::print_message("Database", std::string("Error checking inactive clients: ") + e.what(),
+                              ui::MessageType::ERROR);
+        }
+
+        return inactive_clients;
     }
 } // namespace tinymq

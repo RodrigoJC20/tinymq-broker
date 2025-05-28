@@ -5,6 +5,7 @@
 #include <iostream>
 #include <nlohmann/json.hpp>
 #include <unordered_set>
+#include <chrono>
 
 namespace tinymq
 {
@@ -13,7 +14,8 @@ namespace tinymq
         : io_context_(),
           acceptor_(io_context_, boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), port)),
           thread_pool_size_(thread_pool_size),
-          running_(false)
+          running_(false),
+          activity_timer_(std::make_unique<boost::asio::steady_timer>(io_context_))
     {
 
         if (!db_connection_str.empty())
@@ -49,6 +51,11 @@ namespace tinymq
                 ui::print_message("Broker", "Failed to initialize database, continuing without DB support",
                                   ui::MessageType::ERROR);
                 db_manager_.reset();
+            }
+            else
+            {
+                // Start client activity monitoring if database is available
+                start_client_activity_check();
             }
         }
 
@@ -466,6 +473,12 @@ namespace tinymq
         running_ = false;
 
         acceptor_.close();
+
+        // Cancel the activity timer
+        if (activity_timer_)
+        {
+            activity_timer_->cancel();
+        }
 
         io_context_.stop();
 
@@ -1389,13 +1402,25 @@ namespace tinymq
             // Log the message
             if (topic_id != -1)
             {
-                // Create a preview for DB (truncate if too long)
+                // Create a small preview of the message
+                std::string preview;
+                size_t preview_size = std::min(message.size(), static_cast<size_t>(20));
+                if (preview_size > 0)
+                {
+                    preview = std::string(message.begin(), message.begin() + preview_size);
+                    if (message.size() > 50)
+                    {
+                        preview += "...";
+                    }
+                }
+
+                // Create a larger preview for DB (50 chars)
                 std::string preview_large;
-                size_t preview_large_size = std::min(message.size(), static_cast<size_t>(150));
+                size_t preview_large_size = std::min(message.size(), static_cast<size_t>(100));
                 if (preview_large_size > 0)
                 {
                     preview_large = std::string(message.begin(), message.begin() + preview_large_size);
-                    if (message.size() > 150)
+                    if (message.size() > 100)
                     {
                         preview_large += "...";
                     }
@@ -1463,7 +1488,6 @@ namespace tinymq
         }
         return ""; // No es un formato de tópico válido
     }
-
     void Broker::send_published_topics(std::shared_ptr<Session> session)
     {
         if (!has_database())

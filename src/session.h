@@ -29,6 +29,24 @@ namespace tinymq
         void handle_topic_request(const Packet &packet);
         void send_topic_list(const std::vector<std::pair<std::string, std::string>> &topics);
 
+        // Force disconnect the client
+        void disconnect();
+
+        void handle_admin_request(const Packet &packet);
+
+        // Métodos de administración - DECLARAR SOLO UNA VEZ
+        void handle_admin_response(const Packet &packet);
+        void handle_admin_list_request(const Packet &packet);
+        void handle_my_topics_request(const Packet &packet);
+        void handle_my_admin_requests(const Packet &packet);
+
+        // Métodos para nueva funcionalidad de administración
+        void handle_my_admin_topics_request(const Packet &packet);
+        void handle_admin_resignation(const Packet &packet);
+        void handle_topic_sensors_request(const Packet &packet);
+
+        void send_ack(PacketType ack_type, uint16_t packet_id = 0);
+
     private:
         void read_header();
         void read_payload(PacketHeader header);
@@ -63,4 +81,4 @@ namespace tinymq
         static constexpr size_t header_length = 4;
     };
 
-} // namespace tinymq
+}
