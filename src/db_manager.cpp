@@ -136,9 +136,8 @@ namespace tinymq
                         "DELETE FROM topic_admins WHERE topic_id = $1 AND admin_client_id = $2",
                         topic_id, admin_client_id);
 
-            // Actualizar admin_requests a 'resigned'
             exec_params(txn,
-                        "UPDATE admin_requests SET status = 'resigned', response_timestamp = NOW() "
+                        "UPDATE admin_requests SET status = 'revoked', response_timestamp = NOW() "
                         "WHERE topic_id = $1 AND requester_client_id = $2 AND status = 'approved'",
                         topic_id, admin_client_id);
 

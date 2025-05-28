@@ -95,7 +95,7 @@ namespace tinymq
         pqxx::result exec_params(pqxx::work &txn, const std::string &query, Args &&...args)
         {
 #if PQXX_EXEC_PARAMS_DIRECT
-            return txn.exec_params(query, std::forward<Args>(args)...);
+            return txn.exec(pqxx::zview(query.c_str()), pqxx::params(std::forward<Args>(args)...));
 #else
             return txn.exec(query, pqxx::params(std::forward<Args>(args)...));
 #endif
