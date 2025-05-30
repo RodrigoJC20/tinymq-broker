@@ -155,25 +155,15 @@ namespace tinymq
 
     std::vector<std::map<std::string, std::string>> DbManager::get_topic_sensors_config(const std::string &topic_name, const std::string &admin_client_id)
     {
-        ui::print_message("DbManager", "INICIO get_topic_sensors_config para tópico: " + topic_name, ui::MessageType::DEBUG);
 
         std::vector<std::map<std::string, std::string>> sensors;
         try
         {
-            ui::print_message("DbManager", "Intentando adquirir mutex...", ui::MessageType::DEBUG);
             std::lock_guard<std::mutex> lock(db_mutex_);
-            ui::print_message("DbManager", "Mutex adquirido", ui::MessageType::DEBUG);
-
-            ui::print_message("DbManager", "Abriendo conexión a la base de datos...", ui::MessageType::DEBUG);
             pqxx::connection conn(connection_string_);
-            ui::print_message("DbManager", "Conexión a BD abierta", ui::MessageType::DEBUG);
-
-            ui::print_message("DbManager", "Iniciando transacción...", ui::MessageType::DEBUG);
             pqxx::work txn(conn);
-            ui::print_message("DbManager", "Transacción iniciada", ui::MessageType::DEBUG);
 
             // Verificar que es administrador o dueño
-            ui::print_message("DbManager", "Verificando si es admin...", ui::MessageType::DEBUG);
             if (!is_topic_admin(txn, topic_name, admin_client_id))
             {
                 ui::print_message("DbManager", "User is not admin of topic: " + topic_name, ui::MessageType::WARNING);
@@ -185,8 +175,6 @@ namespace tinymq
                                             "SELECT id FROM topics WHERE name = $1",
                                             topic_name);
 
-            ui::print_message("DbManager", "Consulta de topic_id ejecutada", ui::MessageType::DEBUG);
-
             if (topic_result.empty())
             {
                 ui::print_message("DbManager", "Topic no encontrado: " + topic_name, ui::MessageType::WARNING);
@@ -194,10 +182,8 @@ namespace tinymq
             }
 
             int topic_id = topic_result[0]["id"].as<int>();
-            ui::print_message("DbManager", "topic_id obtenido: " + std::to_string(topic_id), ui::MessageType::DEBUG);
 
             // Obtener configuración de sensores
-            ui::print_message("DbManager", "Consultando admin_sensor_config...", ui::MessageType::DEBUG);
             auto result = exec_params(txn,
                                       "SELECT sensor_name, active, activable, updated_at " // AGREGAR 'activable'
                                       "FROM admin_sensor_config "
@@ -227,13 +213,11 @@ namespace tinymq
                 sensor["configured_at"] = updated_at;
                 sensors.push_back(sensor);
             }
-            ui::print_message("DbManager", "Sensores procesados: " + std::to_string(sensors.size()), ui::MessageType::DEBUG);
         }
         catch (const std::exception &e)
         {
             ui::print_message("Database", std::string("Error getting topic sensors config: ") + e.what(), ui::MessageType::ERROR);
         }
-        ui::print_message("DbManager", "FIN get_topic_sensors_config para tópico: " + topic_name, ui::MessageType::DEBUG);
         return sensors;
     }
 
@@ -918,7 +902,6 @@ namespace tinymq
     {
         try
         {
-            // Crear una conexión local como en los otros métodos
             std::lock_guard<std::mutex> lock(db_mutex_);
             pqxx::connection conn(connection_string_);
             pqxx::work txn(conn);
@@ -936,7 +919,7 @@ namespace tinymq
 
             int topic_id = topic_result[0]["id"].as<int>();
 
-            // VERIFICAR SI EXISTE UNA SOLICITUD ANTERIOR
+            // Verificar si existe una solicitud anterior
             auto existing = exec_params(txn,
                                         "SELECT id, status FROM admin_requests WHERE topic_id = $1 AND requester_client_id = $2",
                                         topic_id, requester_id);
@@ -945,15 +928,14 @@ namespace tinymq
             {
                 std::string current_status = existing[0]["status"].as<std::string>();
 
-                // Solo bloquear si está pendiente
-                if (current_status == "pending")
-                {
-                    ui::print_message("Database", "Admin request already pending", ui::MessageType::WARNING);
-                    return false;
-                }
+                // REMOVER ESTA VERIFICACIÓN - ya se hace en handle_admin_request
+                // if (current_status == "pending")
+                // {
+                //     ui::print_message("Database", "Admin request already pending - this should not happen here", ui::MessageType::WARNING);
+                //     return false;
+                // }
 
                 // Si fue rechazada, revocada, o aprobada anteriormente, permitir nueva solicitud
-                // actualizando el registro existente
                 ui::print_message("Database", "Updating previous admin request (status was: " + current_status + ")", ui::MessageType::INFO);
                 exec_params(txn,
                             "UPDATE admin_requests SET status = 'pending', request_timestamp = NOW(), response_timestamp = NULL "
@@ -982,6 +964,7 @@ namespace tinymq
             return false;
         }
     }
+
     bool DbManager::respond_to_admin_request(const std::string &topic_name, const std::string &owner_id,
                                              const std::string &requester_id, bool approved)
     {

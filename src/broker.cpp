@@ -331,7 +331,7 @@ namespace tinymq
         }
 
         // ========================================
-        // VERIFICAR ESTADO ACTUAL DE LA SOLICITUD
+        // VERIFICAR ESTADO ACTUAL DE LA SOLICITUD PRIMERO
         // ========================================
         std::string current_status = db_manager_->check_admin_request_status(topic_name, requester_id);
 
@@ -405,7 +405,7 @@ namespace tinymq
 
             std::string success_json = success_response.dump();
             std::vector<uint8_t> payload(success_json.begin(), success_json.end());
-            Packet success_packet(PacketType::ADMIN_REQ_ACK, 0, payload); // flag 0 = éxito
+            Packet success_packet(PacketType::ADMIN_REQ_ACK, 0, payload);
             requester_session->send_packet(success_packet);
 
             // 🎉 MENSAJE DE ÉXITO COMPLETO
@@ -936,6 +936,16 @@ namespace tinymq
                     if (requester_session && has_database())
                     {
                         // REALIZAR TODAS LAS VERIFICACIONES
+                        std::string current_status = db_manager_->check_admin_request_status(topic_name, requester_id);
+                        if (current_status == "pending")
+                        {
+                            ui::print_message("Broker", "ℹ️ Admin request already pending", ui::MessageType::INFO);
+                            notify_admin_request_error(requester_id, topic_name, "ALREADY_PENDING",
+                                                       "Ya tienes una solicitud pendiente para este tópico.");
+                            ui::print_message("Broker", "=== END ADMIN REQUEST ===", ui::MessageType::INFO);
+                            return;
+                        }
+
                         // Verificar que el solicitante existe
                         if (!db_manager_->client_exists(requester_id))
                         {
